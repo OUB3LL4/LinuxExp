@@ -36,6 +36,7 @@ def leak_canary():
                         break
                     else:
                         canary += p8(j)
+                        break
             except Exception:
                     io.close()
                     continue
