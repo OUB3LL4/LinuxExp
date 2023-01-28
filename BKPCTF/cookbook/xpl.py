@@ -1,7 +1,5 @@
 #!/usr/bin/python3
 from pwn import *
-from pprint import pprint
-import ctypes
 
 elf = context.binary = ELF("./cookbook")
 libc = elf.libc
