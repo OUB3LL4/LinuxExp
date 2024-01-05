@@ -1,0 +1,3 @@
+new page in diary   -------->   
+	write on one side  -----> size < 0xf1
+	write on both sides ----> 0x10f < size < 0x1e1
